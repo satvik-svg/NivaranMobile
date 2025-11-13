@@ -36,6 +36,7 @@ const issueRoutes = require('./routes/issues');
 const rewardRoutes = require('./routes/rewards');
 const userRoutes = require('./routes/users');
 const aiRoutes = require('./routes/aiRoutes');
+const uploadRoutes = require('./routes/upload');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -110,6 +111,7 @@ app.use('/api/issues', issueRoutes);
 app.use('/api/rewards', rewardRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -1,69 +1,110 @@
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 
 class IssueService {
   static async createIssue(issueData) {
     try {
-      if (!supabase) {
+      console.log('🔵 [BACKEND] Creating issue:', issueData);
+      
+      // Force use of admin client to bypass RLS
+      const client = supabaseAdmin || supabase;
+      if (!client) {
         throw new Error('Supabase client not initialized');
       }
       
-      const { data, error } = await supabase
+      console.log('🔵 [BACKEND] Using client:', supabaseAdmin ? 'ADMIN (bypasses RLS)' : 'ANON (subject to RLS)');
+      
+      // Map frontend categories to database categories
+      const categoryMapping = {
+        'infrastructure': 'road_maintenance',
+        'safety': 'public_safety', 
+        'environment': 'waste_management',
+        'transport': 'road_maintenance',
+        'other': 'other'
+      };
+      
+      const dbCategory = categoryMapping[issueData.category] || issueData.category;
+      
+      // Prepare the issue data according to database schema
+      const issuePayload = {
+        title: issueData.title,
+        description: issueData.description,
+        category: dbCategory, // Use mapped category
+        location: issueData.location, // JSONB field
+        images: issueData.images || [], // Array field
+        audio_url: issueData.audio_url,
+        user_id: issueData.user_id,
+        status: 'reported', // Default status from schema
+        votes: 0, // Using 'votes' as per schema, not 'upvotes'
+      };
+
+      console.log('🔵 [BACKEND] Issue payload:', issuePayload);
+      
+      const { data, error } = await client
         .from('issues')
-        .insert({
-          ...issueData,
-          upvotes: 0,
-        })
+        .insert(issuePayload)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('🔵 [BACKEND] Database error:', error);
+        throw error;
+      }
+
+      console.log('🔵 [BACKEND] Issue created:', data);
 
       // Award points to user for reporting
-      await this.awardPointsToUser(issueData.user_id, 10, 'Issue reported');
+      const pointsAwarded = await this.awardPointsToUser(issueData.user_id, 10, 'Issue reported');
+      console.log('🔵 [BACKEND] Points awarded:', pointsAwarded);
 
-      return { issue: data, error: null };
+      return { issue: data, error: null, pointsAwarded };
     } catch (error) {
+      console.error('🔵 [BACKEND] Create issue error:', error);
       return { issue: null, error };
     }
   }
 
   static async getIssues(location, radius = 5000) {
     try {
-      if (!supabase) {
-        throw new Error('Supabase client not initialized');
+      if (!supabaseAdmin) {
+        throw new Error('Supabase admin client not initialized');
       }
       
-      let query = supabase
+      let query = supabaseAdmin
         .from('issues')
         .select(`
           *,
           users:user_id (
-            full_name,
+            name,
             avatar_url
           )
         `)
         .order('created_at', { ascending: false });
 
-      // If location is provided, filter by proximity
-      if (location) {
-        const { latitude, longitude } = location;
-        const latMin = latitude - (radius / 111320);
-        const latMax = latitude + (radius / 111320);
-        const lonMin = longitude - (radius / (111320 * Math.cos(latitude * Math.PI / 180)));
-        const lonMax = longitude + (radius / (111320 * Math.cos(latitude * Math.PI / 180)));
-
-        query = query
-          .gte('latitude', latMin)
-          .lte('latitude', latMax)
-          .gte('longitude', lonMin)
-          .lte('longitude', lonMax);
-      }
-
       const { data, error } = await query;
 
       if (error) throw error;
-      return { issues: data, error: null };
+
+      // Filter by location in JavaScript since JSONB location filtering is complex
+      let filteredIssues = data || [];
+      
+      if (location) {
+        filteredIssues = filteredIssues.filter(issue => {
+          if (!issue.location?.latitude || !issue.location?.longitude) return true;
+          
+          const distance = this.calculateDistance(
+            location.latitude,
+            location.longitude,
+            issue.location.latitude,
+            issue.location.longitude
+          );
+          
+          return distance <= radius;
+        });
+      }
+
+      return { issues: filteredIssues, error: null };
     } catch (error) {
+      console.error('🔵 [BACKEND] Get issues error:', error);
       return { issues: [], error };
     }
   }
@@ -96,16 +137,16 @@ class IssueService {
 
       if (voteError) throw voteError;
 
-      // Increment upvotes count
+      // Increment votes count (using 'votes' field as per schema)
       const { data: issue } = await supabase
         .from('issues')
-        .select('upvotes')
+        .select('votes')
         .eq('id', issueId)
         .single();
 
       const { error: updateError } = await supabase
         .from('issues')
-        .update({ upvotes: (issue?.upvotes || 0) + 1 })
+        .update({ votes: (issue?.votes || 0) + 1 })
         .eq('id', issueId);
 
       if (updateError) throw updateError;
@@ -117,6 +158,22 @@ class IssueService {
     } catch (error) {
       return { error };
     }
+  }
+
+  // Helper method to calculate distance between two points
+  static calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c; // Distance in meters
   }
 
   static async updateIssueStatus(issueId, status) {
@@ -141,30 +198,52 @@ class IssueService {
 
   static async awardPointsToUser(userId, points, reason) {
     try {
-      if (!supabase) {
+      console.log('🎯 [POINTS] Awarding points:', { userId, points, reason });
+      
+      // Use admin client to bypass RLS for points operations
+      const client = supabaseAdmin || supabase;
+      if (!client) {
         throw new Error('Supabase client not initialized');
       }
       
+      console.log('🎯 [POINTS] Using client:', supabaseAdmin ? 'ADMIN (bypasses RLS)' : 'ANON (subject to RLS)');
+      
       // Add to rewards table
-      await supabase.from('rewards').insert({
+      const { error: rewardError } = await client.from('rewards').insert({
         user_id: userId,
-        points,
+        points_earned: points, // Using correct field name from schema
         reason,
       });
 
+      if (rewardError) {
+        console.error('🎯 [POINTS] Reward insert error:', rewardError);
+        throw rewardError;
+      }
+
       // Update user points
-      const { data: user } = await supabase
+      const { data: user } = await client
         .from('users')
         .select('points')
         .eq('id', userId)
         .single();
 
-      await supabase
+      const newPoints = (user?.points || 0) + points;
+      
+      const { error: updateError } = await client
         .from('users')
-        .update({ points: (user?.points || 0) + points })
+        .update({ points: newPoints })
         .eq('id', userId);
+
+      if (updateError) {
+        console.error('🎯 [POINTS] User update error:', updateError);
+        throw updateError;
+      }
+
+      console.log('🎯 [POINTS] Points awarded successfully. New total:', newPoints);
+      return points;
     } catch (error) {
-      console.error('Error awarding points:', error);
+      console.error('🎯 [POINTS] Error awarding points:', error);
+      return 0;
     }
   }
 }

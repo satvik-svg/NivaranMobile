@@ -5,6 +5,8 @@ const router = express.Router();
 // Create issue
 router.post('/', async (req, res) => {
   try {
+    console.log('🟢 [ROUTE] Create issue request:', req.body);
+    
     const issueData = req.body;
     
     if (!issueData.title || !issueData.description || !issueData.user_id) {
@@ -14,12 +16,19 @@ router.post('/', async (req, res) => {
     const result = await IssueService.createIssue(issueData);
     
     if (result.error) {
-      return res.status(400).json({ error: result.error.message });
+      console.error('🟢 [ROUTE] Create issue error:', result.error);
+      return res.status(400).json({ error: result.error.message || result.error });
     }
 
-    res.status(201).json({ issue: result.issue });
+    console.log('🟢 [ROUTE] Issue created successfully:', result.issue.id);
+    
+    res.status(201).json({ 
+      issue: result.issue,
+      pointsAwarded: result.pointsAwarded || 0,
+      message: 'Issue created successfully and points awarded!'
+    });
   } catch (error) {
-    console.error('Create issue error:', error);
+    console.error('🟢 [ROUTE] Create issue error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

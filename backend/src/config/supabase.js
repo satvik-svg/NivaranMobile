@@ -18,9 +18,15 @@ const isSupabaseConfigured = () => {
 const supabase = isSupabaseConfigured() ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 // Admin client with service role key for admin operations
-const supabaseAdmin = isSupabaseConfigured() && supabaseServiceKey 
+const supabaseAdmin = isSupabaseConfigured() && supabaseServiceKey && supabaseServiceKey !== 'your_supabase_service_role_key_here'
   ? createClient(supabaseUrl, supabaseServiceKey) 
   : null;
+
+console.log('🔧 [SUPABASE] Configuration check:');
+console.log('🔧 [SUPABASE] URL configured:', !!supabaseUrl);
+console.log('🔧 [SUPABASE] Anon key configured:', !!supabaseAnonKey);
+console.log('🔧 [SUPABASE] Service key configured:', !!supabaseServiceKey && supabaseServiceKey !== 'your_supabase_service_role_key_here');
+console.log('🔧 [SUPABASE] Admin client available:', !!supabaseAdmin);
 
 module.exports = {
   supabase,

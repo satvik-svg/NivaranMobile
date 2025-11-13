@@ -12,7 +12,7 @@ import {
   FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { AuthService } from '../services/authService';
 import { RewardService } from '../services/rewardService';
 import { User, Reward } from '../types';
@@ -27,6 +27,14 @@ const RewardsScreen: React.FC = () => {
   useEffect(() => {
     loadUserData();
   }, []);
+
+  // Refresh user data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 RewardsScreen focused, refreshing user data...');
+      loadUserData();
+    }, [])
+  );
 
   const loadUserData = async () => {
     try {

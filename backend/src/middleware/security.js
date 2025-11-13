@@ -96,6 +96,7 @@ const devCorsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['*'],
   credentials: true,
+  optionsSuccessStatus: 200,
 };
 
 // IP whitelist middleware (for admin endpoints)
@@ -235,18 +236,25 @@ const preventXSS = (req, res, next) => {
 
 // Prevent SQL injection attacks
 const preventSQLInjection = (req, res, next) => {
+  // More specific SQL injection patterns that are less likely to trigger false positives
   const sqlPatterns = [
-    /(\b(select|insert|update|delete|drop|create|alter|exec|execute|union|script)\b)/gi,
-    /((\%27)|(\'))|(\-\-)|(\%23)|(#)/gi,
-    /((\%3D)|(=))[^\n]*((\%27)|(\')|((\%3B)|(;)))/gi,
+    // SQL injection with quotes and semicolons
+    /((\%27)|(\'))[^\w\s]*((\%3B)|(;))/gi,
+    // Union-based SQL injection
+    /((\%27)|(\'))[\s]*(union|select)/gi,
+    // Comment-based SQL injection
+    /((\%27)|(\'))[\s]*(\-\-|(\%23)|#)/gi,
+    // SQL commands with suspicious context (not standalone words)
+    /['"]\s*(select|insert|update|delete|drop|create|alter|exec|execute)\s+/gi,
+    // Hex-encoded SQL injection attempts
     /\w*((\%27)|(\'))((\%6F)|o|(\%4F))((\%72)|r|(\%52))/gi,
-    /((\%27)|(\'))union/gi,
   ];
 
   const checkForSQLInjection = (obj) => {
     if (typeof obj === 'string') {
       for (const pattern of sqlPatterns) {
         if (pattern.test(obj)) {
+          console.warn('SQL injection pattern detected:', pattern, 'in:', obj);
           return true;
         }
       }

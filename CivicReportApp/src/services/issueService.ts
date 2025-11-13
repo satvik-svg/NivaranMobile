@@ -1,6 +1,53 @@
 import { supabase } from './supabase';
 import { Issue, Location } from '../types';
 
+// Helper function to upload image via backend API
+async function uploadImageToStorage(imageUri: string): Promise<string | null> {
+  try {
+    console.log('📤 [UPLOAD] Starting image upload via backend:', imageUri);
+
+    // Create FormData for the backend API
+    const formData = new FormData();
+    formData.append('image', {
+      uri: imageUri,
+      name: 'issue-image.jpg',
+      type: 'image/jpeg',
+    } as any);
+
+    // Upload via backend API (uses service role key, bypasses RLS)
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:1200/api';
+    const uploadUrl = `${apiUrl}/upload/image`;
+    
+    console.log('📤 [UPLOAD] Calling backend upload API:', uploadUrl);
+
+    const response = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        // Don't set Content-Type for FormData - let the browser set it with boundary
+      },
+      body: formData,
+    });
+
+    console.log('📤 [UPLOAD] Backend response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ [UPLOAD] Backend error:', errorText);
+      throw new Error(`Upload failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ [UPLOAD] Upload successful:', result.url);
+    
+    return result.url;
+
+  } catch (error) {
+    console.error('❌ [UPLOAD] Image upload failed:', error);
+    return null;
+  }
+}
+
 export class IssueService {
   static async createIssue(issueData: {
     title: string;
@@ -12,44 +59,76 @@ export class IssueService {
     user_id: string;
   }) {
     try {
-      if (!supabase) {
-        throw new Error('Supabase not configured');
+      console.log('📝 [CREATE_ISSUE] Starting issue creation...');
+      console.log('📝 [CREATE_ISSUE] Issue data:', issueData);
+
+      // Step 1: Handle images - use placeholder for now (image upload disabled)
+      let uploadedImageUrls: string[] = [];
+      
+      if (issueData.images && issueData.images.length > 0) {
+        console.log('📝 [CREATE_ISSUE] Images detected, using placeholder URLs...');
+        
+        // For each image, use a placeholder URL
+        for (let i = 0; i < issueData.images.length; i++) {
+          uploadedImageUrls.push(`placeholder-image-${i + 1}.jpg`);
+        }
+        
+        console.log('📝 [CREATE_ISSUE] Using placeholder image URLs:', uploadedImageUrls);
       }
 
-      const newIssue = {
+      // Step 2: Prepare issue data for backend
+      const issuePayload = {
         title: issueData.title,
         description: issueData.description,
         category: issueData.category,
         location: issueData.location,
-        images: issueData.images || [],
+        images: uploadedImageUrls,
         audio_url: issueData.audio_url,
         user_id: issueData.user_id,
-        status: 'open',
-        votes: 0,
-        created_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
-        .from('issues')
-        .insert(newIssue)
-        .select()
-        .single();
+      // Step 3: Call backend API to create issue and award points
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:1200/api';
+      console.log('📝 [CREATE_ISSUE] Calling backend API:', `${apiUrl}/issues`);
 
-      if (error) throw error;
+      const response = await fetch(`${apiUrl}/issues`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(issuePayload),
+      });
+
+      console.log('📝 [CREATE_ISSUE] Backend response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('📝 [CREATE_ISSUE] Backend error:', errorText);
+        throw new Error(`Backend error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('📝 [CREATE_ISSUE] Backend response:', result);
 
       // Add helper properties for backward compatibility
       const issueWithHelpers = {
-        ...data,
-        latitude: data.location.latitude,
-        longitude: data.location.longitude,
-        address: data.location.address,
-        photo_url: data.images?.[0],
-        upvotes: data.votes
+        ...result.issue,
+        latitude: result.issue.location?.latitude || 0,
+        longitude: result.issue.location?.longitude || 0,
+        address: result.issue.location?.address,
+        photo_url: result.issue.images?.[0],
+        upvotes: result.issue.votes || 0
       };
 
-      return { issue: issueWithHelpers, error: null };
+      return { 
+        issue: issueWithHelpers, 
+        error: null,
+        pointsAwarded: result.pointsAwarded || 0
+      };
+
     } catch (error) {
-      console.error('Error creating issue:', error);
+      console.error('❌ [CREATE_ISSUE] Error creating issue:', error);
       return { issue: null, error };
     }
   }

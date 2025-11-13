@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { AuthService } from '../services/authService';
 import { User } from '../types';
 
@@ -19,6 +20,14 @@ const ProfileScreen: React.FC = () => {
   useEffect(() => {
     loadUserData();
   }, []);
+
+  // Refresh user data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 ProfileScreen focused, refreshing user data...');
+      loadUserData();
+    }, [])
+  );
 
   const loadUserData = async () => {
     try {

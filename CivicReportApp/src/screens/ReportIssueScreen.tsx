@@ -314,17 +314,39 @@ const ReportIssueScreen = () => {
         user_id: currentUser.id,
       };
 
-      const { issue, error } = await IssueService.createIssue(issueData);
+      const { issue, error, pointsAwarded } = await IssueService.createIssue(issueData);
 
       if (error) {
-        Alert.alert('Error', 'Failed to submit report');
+        console.error('📱 [MOBILE] Submit error:', error);
+        Alert.alert('Error', 'Failed to submit report. Please try again.');
       } else {
-        Alert.alert('Success', 'Issue reported successfully!', [
-          {
-            text: 'OK',
-            onPress: resetForm,
-          },
-        ]);
+        console.log('📱 [MOBILE] Issue created successfully:', issue);
+        const pointsMessage = pointsAwarded ? `\n\n🎉 You earned ${pointsAwarded} XP points!` : '';
+        Alert.alert(
+          'Success', 
+          `Issue reported successfully!${pointsMessage}`, 
+          [
+            {
+              text: 'OK',
+              onPress: async () => {
+                resetForm();
+                // Refresh user data to show updated points
+                console.log('🔄 Refreshing user data after successful submission...');
+                
+                // Small delay to ensure database has been updated
+                setTimeout(async () => {
+                  const updatedUser = await AuthService.getCurrentUser();
+                  if (updatedUser) {
+                    console.log('✅ Updated user data:', updatedUser);
+                    setCurrentUser(updatedUser);
+                  } else {
+                    console.log('⚠️ Failed to refresh user data');
+                  }
+                }, 1000); // 1 second delay
+              },
+            },
+          ]
+        );
       }
     } catch (error) {
       Alert.alert('Error', 'An unexpected error occurred');
